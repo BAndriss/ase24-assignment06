@@ -1,5 +1,6 @@
 package de.unibayreuth.se.taskboard.data.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import de.unibayreuth.se.taskboard.business.domain.Task;
 import de.unibayreuth.se.taskboard.business.domain.TaskStatus;
 import de.unibayreuth.se.taskboard.business.exceptions.TaskNotFoundException;
@@ -27,6 +28,7 @@ public class TaskPersistenceServiceEventSourcingImpl implements TaskPersistenceS
     private final TaskRepository taskRepository;
     private final TaskEntityMapper taskEntityMapper;
     private final EventRepository eventRepository;
+    private final ObjectMapper objectMapper;
     @Override
     public void clear() {
         taskRepository.findAll()
@@ -72,7 +74,6 @@ public class TaskPersistenceServiceEventSourcingImpl implements TaskPersistenceS
     @NonNull
     @Override
     public Task upsert(@NonNull Task task) throws TaskNotFoundException {
-        // TODO: Implement upsert
 
         /*
         The upsert method in the TaskPersistenceServiceEventSourcingImpl class handles both the creation and updating of tasks.
@@ -81,12 +82,31 @@ public class TaskPersistenceServiceEventSourcingImpl implements TaskPersistenceS
         In both cases, it uses the EventRepository to log the changes and the TaskRepository to persist the task data.
         */
 
-        return new Task("title", "description");
+        if (task.getId() == null) {
+            task.setId(UUID.randomUUID());
+            eventRepository.saveAndFlush(
+                    EventEntity.insertEventOf(task, task.getId(), objectMapper)
+            );
+            taskRepository.save(taskEntityMapper.toEntity(task));
+
+        }
+        else {
+            Optional<Task> existingTask = taskRepository.findById(task.getId()).map(taskEntityMapper::fromEntity);
+            if (existingTask.isPresent()) {
+                eventRepository.saveAndFlush(
+                        EventEntity.updateEventOf(task, task.getId(), objectMapper)
+                );
+                taskRepository.save(taskEntityMapper.toEntity(task));
+            }
+            else {
+                throw new TaskNotFoundException("Task not found with ID: " + task.getId());
+            }
+        }
+        return task;
     }
 
     @Override
     public void delete(@NonNull UUID id) throws TaskNotFoundException {
-        // TODO: Implement delete
 
         /*
         The delete method in the TaskPersistenceServiceEventSourcingImpl class performs the following actions:
@@ -96,5 +116,19 @@ public class TaskPersistenceServiceEventSourcingImpl implements TaskPersistenceS
         Checks if the task still exists in the taskRepository.
         If the task still exists, it throws an IllegalStateException indicating the task was not successfully deleted.
         */
+        Optional<Task> task = taskRepository.findById(id).map(taskEntityMapper::fromEntity);
+        if (task.isPresent()) {
+            eventRepository.saveAndFlush(
+                    EventEntity.deleteEventOf(task.get(), task.get().getId())
+            );
+            Optional<Task> task_removed = taskRepository.findById(id).map(taskEntityMapper::fromEntity);
+            if (task_removed.isPresent()) {
+                throw new IllegalStateException("Task delete with " + id + " was not successfully.");
+            }
+        }
+        else{
+            throw new TaskNotFoundException("Task not found.");
+        }
+
     }
 }
